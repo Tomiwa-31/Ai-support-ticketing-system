@@ -1,0 +1,230 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Pylon Dummy Dashboard</title>
+<style>
+  :root {
+    --bg: #f5f6f8; --panel: #fff; --border: #dfe2e8; --text: #1c2230; --muted: #6a7385;
+    --accent: #3b5bdb; --red: #d6336c; --green: #2f9e44; --amber: #e8890c; --blue-bg: #e7efff;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --bg: #12151c; --panel: #1b1f29; --border: #2d3340; --text: #e6e9f0; --muted: #8b94a7;
+      --accent: #7c97ff; --red: #ff6b9a; --green: #5fd07a; --amber: #ffb04d; --blue-bg: #232d4d;
+    }
+  }
+  * { box-sizing: border-box; }
+  body { margin: 0; font: 14px/1.4 system-ui, sans-serif; background: var(--bg); color: var(--text); height: 100vh; display: flex; flex-direction: column; }
+  header { display: flex; align-items: center; gap: 12px; padding: 10px 16px; background: var(--panel); border-bottom: 1px solid var(--border); flex-wrap: wrap; }
+  header h1 { font-size: 16px; margin: 0; }
+  #conn { font-size: 12px; padding: 2px 8px; border-radius: 10px; border: 1px solid var(--border); color: var(--muted); }
+  #conn.live { color: var(--green); border-color: var(--green); }
+  form#sim { display: flex; gap: 6px; margin-left: auto; flex-wrap: wrap; align-items: center; }
+  form#sim select, form#sim input, form#sim button { font: inherit; padding: 4px 8px; border: 1px solid var(--border); border-radius: 6px; background: var(--bg); color: var(--text); }
+  form#sim button { background: var(--accent); color: #fff; border-color: var(--accent); cursor: pointer; }
+  form#sim input[name=body] { width: 220px; }
+  form#sim input[name=title] { width: 150px; }
+  main { flex: 1; display: grid; grid-template-columns: 320px 1fr 360px; gap: 12px; padding: 12px; min-height: 0; }
+  @media (max-width: 1000px) { main { grid-template-columns: 1fr; overflow: auto; } }
+  section { background: var(--panel); border: 1px solid var(--border); border-radius: 8px; display: flex; flex-direction: column; min-height: 0; }
+  section > h2 { font-size: 13px; text-transform: uppercase; letter-spacing: .04em; color: var(--muted); margin: 0; padding: 10px 12px; border-bottom: 1px solid var(--border); }
+  .scroll { overflow: auto; flex: 1; }
+  .issue { padding: 10px 12px; border-bottom: 1px solid var(--border); cursor: pointer; }
+  .issue:hover { background: var(--bg); }
+  .issue.selected { background: var(--blue-bg); }
+  .issue .title { font-weight: 600; }
+  .issue .meta, .muted { color: var(--muted); font-size: 12px; }
+  .badge { display: inline-block; font-size: 11px; padding: 1px 7px; border-radius: 10px; border: 1px solid var(--border); margin-right: 4px; }
+  .badge.status-New, .badge.status-On\ You { color: var(--amber); border-color: var(--amber); }
+  .badge.status-On\ Customer { color: var(--accent); border-color: var(--accent); }
+  .badge.status-On\ Hold, .badge.status-Closed { color: var(--muted); }
+  .badge.tag { color: var(--green); border-color: var(--green); }
+  .badge.breach { color: #fff; background: var(--red); border-color: var(--red); }
+  .sla { font-size: 12px; color: var(--muted); }
+  .banner { margin: 10px 12px; padding: 8px 10px; border-radius: 6px; background: var(--red); color: #fff; font-weight: 600; }
+  .msg { margin: 10px 12px; padding: 8px 10px; border-radius: 8px; background: var(--bg); max-width: 85%; }
+  .msg.contact { border-left: 3px solid var(--amber); }
+  .msg.user { border-left: 3px solid var(--accent); margin-left: auto; }
+  .msg.note { background: #fff6d6; color: #5c4a00; border-left-color: #e0b400; }
+  .msg .who { font-size: 12px; color: var(--muted); margin-bottom: 2px; }
+  .msg.note .who { color: #8a6f00; }
+  .msg .body { white-space: pre-wrap; word-break: break-word; }
+  .log { padding: 5px 12px; border-bottom: 1px solid var(--border); font: 12px/1.35 ui-monospace, Consolas, monospace; }
+  .log.trigger { background: var(--blue-bg); }
+  .log.breach { background: var(--red); color: #fff; }
+  .log .t { color: var(--muted); }
+  .log.breach .t { color: #ffd6e4; }
+  .empty { padding: 16px 12px; color: var(--muted); }
+</style>
+</head>
+<body>
+<header>
+  <h1>Pylon Dummy</h1>
+  <span id="conn">connecting…</span>
+  <form id="sim">
+    <select name="issue_id" title="Thread"><option value="">New issue</option></select>
+    <select name="author_type"><option value="contact">Customer</option><option value="user">Teammate</option></select>
+    <input name="title" placeholder="Title (new issue)">
+    <input name="body" placeholder="Message body" required>
+    <button type="submit">Send simulated message</button>
+  </form>
+</header>
+<main>
+  <section><h2>Issues</h2><div class="scroll" id="issues"></div></section>
+  <section><h2 id="thread-title">Thread</h2><div class="scroll" id="thread"></div></section>
+  <section><h2>Trigger / audit log</h2><div class="scroll" id="logs"></div></section>
+</main>
+<script>
+  let data = { issues: [], audit_logs: [] };
+  let receivedAt = Date.now();
+  let selectedId = null;
+
+  const $ = (id) => document.getElementById(id);
+
+  function el(tag, props = {}, ...children) {
+    const node = document.createElement(tag);
+    for (const [key, value] of Object.entries(props)) {
+      if (key === 'class') node.className = value;
+      else if (key === 'onclick') node.onclick = value;
+      else node.setAttribute(key, value);
+    }
+    for (const child of children) node.append(child);
+    return node;
+  }
+
+  function fmtDuration(seconds) {
+    const m = Math.floor(seconds / 60);
+    return m >= 60 ? `${Math.floor(m / 60)}h ${m % 60}m` : `${m}m ${seconds % 60}s`;
+  }
+
+  function fmtTime(iso) {
+    return iso ? new Date(iso).toLocaleTimeString() : '';
+  }
+
+  function slaText(sla) {
+    if (!sla) return '';
+    const live = sla.elapsed_seconds + (sla.running ? Math.floor((Date.now() - receivedAt) / 1000) : 0);
+    const state = sla.breached_at ? 'breached' : sla.running ? 'running' : 'paused';
+    return `${sla.name}: ${fmtDuration(live)} / ${fmtDuration(sla.target_minutes * 60)} (${state})`;
+  }
+
+  function renderIssues() {
+    const box = $('issues');
+    box.replaceChildren();
+    if (!data.issues.length) box.append(el('div', { class: 'empty' }, 'No issues yet.'));
+    for (const issue of data.issues) {
+      const badges = el('div', {},
+        el('span', { class: `badge status-${issue.status}` }, issue.status),
+        ...issue.tags.map((t) => el('span', { class: 'badge tag' }, t)),
+      );
+      if (issue.sla && issue.sla.breached_at) badges.append(el('span', { class: 'badge breach' }, 'SLA breached'));
+      box.append(el('div', {
+        class: 'issue' + (issue.id === selectedId ? ' selected' : ''),
+        'data-id': issue.id,
+        onclick: () => { selectedId = issue.id; render(); },
+      },
+        el('div', { class: 'title' }, `#${issue.id} ${issue.title}`),
+        el('div', { class: 'meta' }, `${issue.contact_name} · ${issue.channel}`),
+        badges,
+        el('div', { class: 'sla', 'data-sla': issue.id }, slaText(issue.sla)),
+      ));
+    }
+  }
+
+  function renderThread() {
+    const box = $('thread');
+    box.replaceChildren();
+    const issue = data.issues.find((i) => i.id === selectedId);
+    $('thread-title').textContent = issue ? `#${issue.id} ${issue.title}` : 'Thread';
+    if (!issue) { box.append(el('div', { class: 'empty' }, 'Select an issue.')); return; }
+    if (issue.sla && issue.sla.breached_at) {
+      box.append(el('div', { class: 'banner' }, `${issue.sla.name} SLA breached at ${fmtTime(issue.sla.breached_at)}`));
+    }
+    if (!issue.messages.length) box.append(el('div', { class: 'empty' }, 'No messages.'));
+    for (const m of issue.messages) {
+      box.append(el('div', { class: `msg ${m.author_type}${m.is_internal_note ? ' note' : ''}` },
+        el('div', { class: 'who' }, `${m.author_name}${m.is_internal_note ? ' (internal note)' : ''} · ${fmtTime(m.created_at)}`),
+        el('div', { class: 'body' }, m.body),
+      ));
+    }
+    box.scrollTop = box.scrollHeight;
+  }
+
+  function renderLogs() {
+    const box = $('logs');
+    box.replaceChildren();
+    for (const log of data.audit_logs) {
+      const kind = log.action.startsWith('sla.breached') ? 'breach' : log.actor_type === 'trigger' ? 'trigger' : '';
+      box.append(el('div', { class: `log ${kind}` },
+        el('span', { class: 't' }, `${fmtTime(log.happened_at)} `),
+        `${log.actor_type}${log.actor_id ? '#' + log.actor_id : ''} → ${log.action} [${log.target_type} ${log.target_id}]`,
+      ));
+    }
+  }
+
+  function renderThreadPicker() {
+    const select = document.querySelector('#sim select[name=issue_id]');
+    const current = select.value;
+    select.replaceChildren(el('option', { value: '' }, 'New issue'),
+      ...data.issues.map((i) => el('option', { value: i.id }, `#${i.id} ${i.title}`.slice(0, 40))));
+    select.value = current;
+  }
+
+  function render() {
+    if (selectedId === null && data.issues.length) selectedId = data.issues[0].id;
+    renderIssues();
+    renderThread();
+    renderLogs();
+    renderThreadPicker();
+  }
+
+  setInterval(() => {
+    for (const issue of data.issues) {
+      const node = document.querySelector(`[data-sla="${issue.id}"]`);
+      if (node) node.textContent = slaText(issue.sla);
+    }
+  }, 1000);
+
+  function connect() {
+    const ws = new WebSocket(`${location.protocol === 'https:' ? 'wss' : 'ws'}://${location.host}/ws`);
+    ws.onopen = () => { $('conn').textContent = 'live'; $('conn').className = 'live'; };
+    ws.onmessage = (event) => {
+      const payload = JSON.parse(event.data);
+      if (payload.type !== 'snapshot') return;
+      data = payload;
+      receivedAt = Date.now();
+      render();
+    };
+    ws.onclose = () => {
+      $('conn').textContent = 'disconnected — retrying…';
+      $('conn').className = '';
+      setTimeout(connect, 2000);
+    };
+  }
+
+  // Demo defaults match seed.py: org 1, account 1, contact 1, teammate 1.
+  $('sim').addEventListener('submit', async (event) => {
+    event.preventDefault();
+    const form = new FormData(event.target);
+    const authorType = form.get('author_type');
+    const payload = {
+      org_id: 1, account_id: 1, author_type: authorType, author_id: 1,
+      body: form.get('body'),
+      issue_id: form.get('issue_id') ? Number(form.get('issue_id')) : null,
+      title: form.get('title') || null,
+    };
+    const response = await fetch('/simulate/message', {
+      method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload),
+    });
+    if (!response.ok) { alert(`Simulate failed: ${(await response.json()).detail}`); return; }
+    event.target.elements.body.value = '';
+    event.target.elements.title.value = '';
+    if (!payload.issue_id) selectedId = null;
+  });
+
+  connect();
+</script>
+</body>
+</html>
