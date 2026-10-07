@@ -22,6 +22,7 @@ def is_counting(status: str) -> bool:
     return status in COUNTING_STATUSES
 
 
+#time used = (now − started_at) − paused_seconds.
 async def _pause_started_at(session: AsyncSession, issue_id: int) -> datetime | None:
     """When the issue's current run of non-counting statuses began.
 
@@ -144,3 +145,4 @@ async def run_breach_checker(
         except Exception as exc:  # noqa: BLE001 -- keep the loop alive on a bad tick
             print(f"[sla] breach check failed: {exc!r}")
         await asyncio.sleep(interval_seconds)
+#flags timers that exceed the target

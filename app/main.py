@@ -53,3 +53,5 @@ async def root():
 @app.get("/dashboard", include_in_schema=False)
 async def dashboard():
     return FileResponse(DASHBOARD_FILE)
+
+#uvicorn app.main:app --reload

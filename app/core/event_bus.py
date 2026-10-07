@@ -102,7 +102,7 @@ async def _handle_event(session: AsyncSession, event: InboundEvent) -> Message:
 async def run_worker(session_factory: async_sessionmaker[AsyncSession]) -> None:
     """The single event-bus worker: consumes canonical events, one at a time, forever."""
     while True:
-        event, future = await _queue.get()
+        event, future = await _queue.get()#takes the next pair off the quesu
         try:
             async with session_factory() as session:
                 message = await _handle_event(session, event)

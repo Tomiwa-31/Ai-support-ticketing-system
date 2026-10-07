@@ -29,6 +29,7 @@ async def seed() -> None:
             team = Team(org_id=org.id, name="Support")
             user = User(org_id=org.id, name="Dana Support", email="dana@commsworth.com", role="agent")
             account = Account(org_id=org.id, name="Acme Corp", primary_domain="acme.com")
+            #These rows use org.id as their foreign key. Order matters: org first, then team/user/account, then contact (needs account.id), because a foreign key can only point to a row that already exists.
             session.add_all([team, user, account])
             await session.flush()
 
