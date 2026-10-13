@@ -6,3 +6,9 @@ __pycache__/
 uvicorn.log
 *.env
 *.log
+
+# Local scratch notes: kept on disk, never committed
+note.txt
+note_phase*.txt
+slack_issue_note.txt
+status_machine_summary.docx
