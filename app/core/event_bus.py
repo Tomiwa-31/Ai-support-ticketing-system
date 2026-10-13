@@ -6,7 +6,7 @@ from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 from app.channels.base import InboundEvent
 from app.core import issue_service
-from app.models import AuditLog, Message
+from app.models import AuditLog, IssueContext, Message, MessageContext
 from app.triggers import engine as trigger_engine
 
 logger = logging.getLogger(__name__)
@@ -40,6 +40,11 @@ async def _find_linked_issue_id(session: AsyncSession, channel: str, external_th
         )
         .limit(1)
     )
+
+
+async def find_linked_issue_id(session: AsyncSession, channel: str, external_thread_id: str) -> int | None:
+    """Public lookup for channel read-APIs (e.g. a chat page asking which issue its conversation became)."""
+    return await _find_linked_issue_id(session, channel, external_thread_id)
 
 
 async def _handle_event(session: AsyncSession, event: InboundEvent) -> Message:
@@ -78,7 +83,26 @@ async def _handle_event(session: AsyncSession, event: InboundEvent) -> Message:
                 target_type="issue",
                 target_id=issue.id,
             )
-            await session.commit()
+        if event.context and event.context.get("correlation_id"):
+            session.add(
+                IssueContext(
+                    issue_id=issue.id,
+                    tenant_id=event.context.get("tenant_id"),
+                    product=event.context.get("product"),
+                    customer_ref=event.context.get("customer_ref"),
+                    correlation_id=event.context["correlation_id"],
+                )
+            )
+            await issue_service.write_audit_log(
+                session,
+                org_id=event.org_id,
+                actor_type="channel",
+                actor_id=None,
+                action="issue.context_recorded",
+                target_type="issue",
+                target_id=issue.id,
+            )
+        await session.commit()
         await trigger_engine.evaluate(session, org_id=event.org_id, kickoff_event="issue.created", issue=issue)
 
     message = await issue_service.add_message(
@@ -93,6 +117,28 @@ async def _handle_event(session: AsyncSession, event: InboundEvent) -> Message:
         bypass_validation=True,
     )
     assert message is not None
+    if event.context and event.context.get("correlation_id"):
+        # Every message keeps its own context (not just the first one that opened the issue).
+        session.add(
+            MessageContext(
+                message_id=message.id,
+                issue_id=issue.id,
+                tenant_id=event.context.get("tenant_id"),
+                product=event.context.get("product"),
+                customer_ref=event.context.get("customer_ref"),
+                correlation_id=event.context["correlation_id"],
+            )
+        )
+        await issue_service.write_audit_log(
+            session,
+            org_id=event.org_id,
+            actor_type="channel",
+            actor_id=None,
+            action="message.context_recorded",
+            target_type="message",
+            target_id=message.id,
+        )
+        await session.commit()
     await trigger_engine.evaluate(
         session, org_id=event.org_id, kickoff_event="message.created", issue=issue, message=message
     )

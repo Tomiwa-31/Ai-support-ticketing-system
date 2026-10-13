@@ -57,6 +57,19 @@
   .log .t { color: var(--muted); }
   .log.breach .t { color: #ffd6e4; }
   .empty { padding: 16px 12px; color: var(--muted); }
+  #ai-panel:empty { display: none; }
+  .ai { margin: 10px 12px; padding: 10px; border: 1px solid var(--accent); border-radius: 8px; background: var(--blue-bg); }
+  .ai h3 { margin: 0 0 6px; font-size: 12px; text-transform: uppercase; letter-spacing: .04em; color: var(--accent); }
+  .ai .field { margin: 3px 0; }
+  .ai .fname { font-weight: 600; }
+  .ai .draft-label { margin-top: 8px; }
+  .ai textarea { width: 100%; min-height: 90px; font: inherit; padding: 6px; border: 1px solid var(--border); border-radius: 6px; background: var(--panel); color: var(--text); }
+  .ai .actions { display: flex; gap: 6px; margin-top: 6px; }
+  .ai button { font: inherit; padding: 4px 12px; border-radius: 6px; border: 1px solid var(--border); cursor: pointer; background: var(--panel); color: var(--text); }
+  .ai button.approve { background: var(--green); border-color: var(--green); color: #fff; }
+  .ai .err { color: var(--red); margin-top: 4px; }
+  .ai.done { border-color: var(--border); background: var(--bg); }
+  .ai.failed { border-color: var(--red); }
 </style>
 </head>
 <body>
@@ -73,7 +86,7 @@
 </header>
 <main>
   <section><h2>Issues</h2><div class="scroll" id="issues"></div></section>
-  <section><h2 id="thread-title">Thread</h2><div class="scroll" id="thread"></div></section>
+  <section><h2 id="thread-title">Thread</h2><div id="ai-panel"></div><div class="scroll" id="thread"></div></section>
   <section><h2>Trigger / audit log</h2><div class="scroll" id="logs"></div></section>
 </main>
 <script>
@@ -152,6 +165,72 @@
     box.scrollTop = box.scrollHeight;
   }
 
+  // AI suggestion panel. Rebuilt only when its state changes, so a live snapshot never wipes an agent's edits.
+  const AGENT_USER_ID = 1; // demo agent (seed.py: Dana Support); there is no login in v1/v2 demo
+  let aiSig = '';
+  const aiEdits = {};
+
+  async function decide(suggestionId, verb, body, errBox) {
+    errBox.textContent = '';
+    const response = await fetch(`/ai/suggestions/${suggestionId}/${verb}`, {
+      method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ user_id: AGENT_USER_ID, ...body }),
+    });
+    if (!response.ok) errBox.textContent = `${verb} failed: ${(await response.json()).detail}`;
+  }
+
+  // What the model's `recommended_action` value means, in plain words for the agent.
+  const ACTION_LABELS = {
+    reply_only: 'Reply is ready to send (the draft answers the question)',
+    request_more_info: 'Ask the customer for more information (the draft mainly requests details)',
+    escalate: 'Escalate to a human specialist (the draft is only a holding reply)',
+  };
+  const label = (value) => { const t = String(value).replace(/_/g, ' '); return t.charAt(0).toUpperCase() + t.slice(1); };
+  // One labelled line of the suggestion card: "Label: value".
+  const field = (name, value) => el('div', { class: 'field' }, el('span', { class: 'fname' }, `${name}: `), value);
+
+  function renderAI() {
+    const box = $('ai-panel');
+    const issue = data.issues.find((i) => i.id === selectedId);
+    const ai = issue && issue.ai;
+    const sug = ai && ai.suggestion;
+    const sig = issue ? `${issue.id}|${ai ? ai.run_id + ai.run_status + ai.sources.length + ai.tools.length : ''}|${sug ? sug.id + sug.status : ''}` : '';
+    if (sig === aiSig) return;
+    aiSig = sig;
+    box.replaceChildren();
+    if (!ai) return;
+
+    if (ai.run_status === 'running') {
+      box.append(el('div', { class: 'ai' }, el('h3', {}, 'AI assist'), 'Drafting a suggestion…'));
+    } else if (ai.run_status === 'failed') {
+      box.append(el('div', { class: 'ai failed' }, el('h3', {}, 'AI assist failed'), ai.run_error || 'unknown error'));
+    } else if (sug && sug.status === 'pending') {
+      const area = el('textarea', {});
+      area.value = aiEdits[sug.id] !== undefined ? aiEdits[sug.id] : sug.draft_reply;
+      area.oninput = () => { aiEdits[sug.id] = area.value; };
+      const err = el('div', { class: 'err' });
+      box.append(el('div', { class: 'ai' },
+        el('h3', {}, 'AI suggestion — pending your approval'),
+        field('Category', label(sug.category)),
+        field('Priority', label(sug.priority)),
+        field('Summary', sug.summary),
+        field('Recommended action', (ACTION_LABELS[sug.recommended_action] || label(sug.recommended_action))),
+        field('Knowledge used', ai.sources.length
+          ? ai.sources.map((s) => `${s.title}${s.cited ? ' (cited in the draft)' : ' (retrieved, not used)'}`).join(' · ')
+          : 'no matching articles'),
+        ...(ai.tools.length ? [field('Tools used', ai.tools.map((t) => `${t.tool} (${t.status})`).join(' · '))] : []),
+        el('div', { class: 'muted draft-label' }, 'Draft reply — edit it before sending. Replace any [CARD_n] / [ACCOUNT_n] placeholder (masked values) first:'),
+        area,
+        el('div', { class: 'actions' },
+          el('button', { class: 'approve', onclick: () => decide(sug.id, 'approve', { reply_text: area.value }, err) }, 'Approve & send to customer'),
+          el('button', { onclick: () => decide(sug.id, 'reject', {}, err) }, 'Reject'),
+        ),
+        err,
+      ));
+    } else if (sug) {
+      box.append(el('div', { class: 'ai done' }, el('h3', {}, 'AI suggestion'), `${label(sug.status)} — ${label(sug.category)}, ${sug.priority} priority`));
+    }
+  }
+
   function renderLogs() {
     const box = $('logs');
     box.replaceChildren();
@@ -176,6 +255,7 @@
     if (selectedId === null && data.issues.length) selectedId = data.issues[0].id;
     renderIssues();
     renderThread();
+    renderAI();
     renderLogs();
     renderThreadPicker();
   }

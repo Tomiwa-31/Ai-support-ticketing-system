@@ -8,3 +8,7 @@ pydantic==2.9.2
 pydantic-settings==2.5.2
 python-dotenv==1.0.1
 websockets==13.1
+anthropic==1.12.1
+httpx2==2.13.1
+mcp==1.12.4
+sse-starlette==2.1.3

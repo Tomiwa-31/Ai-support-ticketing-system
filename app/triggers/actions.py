@@ -5,6 +5,7 @@ from typing import Any
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.ai import queue as ai_queue
 from app.core.issue_service import write_audit_log
 from app.models import Issue, Tag, Trigger, TriggerAction
 from app.models.tag import issue_tags
@@ -93,11 +94,27 @@ async def _send_webhook(session: AsyncSession, issue: Issue, trigger: Trigger, p
     )
 
 
+async def _request_ai_assist(session: AsyncSession, issue: Issue, trigger: Trigger, params: dict[str, Any]) -> None:
+    """Ask the AI worker for a suggestion. A rule (this trigger's conditions) decides when AI runs; the worker only
+    ever writes a pending suggestion, never the ticket itself."""
+    ai_queue.request(issue.id)
+    await write_audit_log(
+        session,
+        org_id=issue.org_id,
+        actor_type="trigger",
+        actor_id=trigger.id,
+        action="ai.requested",
+        target_type="issue",
+        target_id=issue.id,
+    )
+
+
 _HANDLERS = {
     "set_status": _set_status,
     "assign_team": _assign_team,
     "add_tag": _add_tag,
     "send_webhook": _send_webhook,
+    "request_ai_assist": _request_ai_assist,
 }
 
 

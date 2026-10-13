@@ -1,7 +1,9 @@
 from app.models.account import Account
+from app.models.ai import AIRun, AIRunEvent, AISuggestion, IssueContext, MessageContext
 from app.models.audit_log import AuditLog
 from app.models.contact import Contact
 from app.models.issue import Issue, IssueStatus
+from app.models.knowledge import KnowledgeArticle, KnowledgeChunk
 from app.models.message import Message
 from app.models.organization import Organization
 from app.models.sla import SLA, SLAInstance
@@ -14,6 +16,13 @@ from app.models.user import User
 #imports all the model files so they can all run and register all of them to the base metadata. which start off empty
 #Then create_all() sees the full register of 15 tables.
 __all__ = [
+    "AIRun",
+    "AIRunEvent",
+    "KnowledgeArticle",
+    "KnowledgeChunk",
+    "AISuggestion",
+    "IssueContext",
+    "MessageContext",
     "Account",
     "AuditLog",
     "Contact",

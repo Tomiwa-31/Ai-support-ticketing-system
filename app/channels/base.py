@@ -19,6 +19,8 @@ class InboundEvent:
     issue_id: int | None = None
     title: str | None = None
     is_internal_note: bool = False
+    # Optional channel-supplied context (tenant_id, product, customer_ref, correlation_id), recorded once per issue.
+    context: dict[str, str | None] | None = None
 
 
 class ChannelAdapter(ABC):

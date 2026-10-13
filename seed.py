@@ -11,12 +11,15 @@ from sqlalchemy import select
 
 from app import models
 from app.database import AsyncSessionLocal, Base, engine
+from app.knowledge import db as knowledge_db
 from app.models import SLA, Account, Contact, Organization, Team, Trigger, TriggerAction, TriggerCondition, User
 
 
 async def seed() -> None:
     async with engine.begin() as conn:
+        await knowledge_db.before_create(conn)
         await conn.run_sync(Base.metadata.create_all)
+        await knowledge_db.after_create(conn)
 
     async with AsyncSessionLocal() as session:
         org = await session.scalar(select(Organization))
@@ -82,6 +85,31 @@ async def seed() -> None:
             print(f"Seeded trigger={trigger.id}")
         else:
             print(f"Example trigger already present (trigger={trigger.id}), skipping.")
+
+        ai_trigger = await session.scalar(
+            select(Trigger).where(Trigger.org_id == org.id, Trigger.name == "AI assist on Conversio customer messages")
+        )
+        if ai_trigger is None:
+            ai_trigger = Trigger(
+                org_id=org.id,
+                name="AI assist on Conversio customer messages",
+                kickoff_event="message.created",
+                position=2,
+                is_enabled=True,
+            )
+            session.add(ai_trigger)
+            await session.flush()
+            session.add_all(
+                [
+                    TriggerCondition(trigger_id=ai_trigger.id, field="issue.channel", operator="equals", value="conversio"),
+                    TriggerCondition(trigger_id=ai_trigger.id, field="message.author_type", operator="equals", value="contact"),
+                    TriggerAction(trigger_id=ai_trigger.id, action_type="request_ai_assist", params=json.dumps({}), position=1),
+                ]
+            )
+            await session.commit()
+            print(f"Seeded AI trigger={ai_trigger.id}")
+        else:
+            print(f"AI trigger already present (trigger={ai_trigger.id}), skipping.")
 
 
 if __name__ == "__main__":

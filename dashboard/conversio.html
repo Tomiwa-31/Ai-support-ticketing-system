@@ -1,0 +1,122 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Conversio chat (simulated)</title>
+<style>
+  :root { --bg: #f5f6f8; --panel: #fff; --border: #dfe2e8; --text: #1c2230; --muted: #6a7385; --accent: #3b5bdb; --me: #e7efff; --agent: #eef7ee; }
+  @media (prefers-color-scheme: dark) {
+    :root { --bg: #12151c; --panel: #1b1f29; --border: #2d3340; --text: #e6e9f0; --muted: #8b94a7; --accent: #7c97ff; --me: #232d4d; --agent: #1f3326; }
+  }
+  * { box-sizing: border-box; }
+  body { margin: 0; font: 14px/1.4 system-ui, sans-serif; background: var(--bg); color: var(--text); display: flex; justify-content: center; }
+  .app { width: 100%; max-width: 560px; height: 100vh; display: flex; flex-direction: column; background: var(--panel); border-inline: 1px solid var(--border); }
+  header { padding: 10px 14px; border-bottom: 1px solid var(--border); }
+  header h1 { font-size: 16px; margin: 0 0 6px; }
+  .row { display: flex; gap: 6px; flex-wrap: wrap; align-items: center; }
+  .row input, .row select, .row button { font: inherit; padding: 4px 8px; border: 1px solid var(--border); border-radius: 6px; background: var(--bg); color: var(--text); }
+  .row button { cursor: pointer; }
+  .muted { color: var(--muted); font-size: 12px; }
+  #log { flex: 1; overflow: auto; padding: 12px; display: flex; flex-direction: column; gap: 8px; }
+  .bubble { max-width: 80%; padding: 8px 10px; border-radius: 10px; white-space: pre-wrap; word-break: break-word; }
+  .bubble.customer { align-self: flex-end; background: var(--me); }
+  .bubble.agent { align-self: flex-start; background: var(--agent); }
+  .bubble .who { font-size: 11px; color: var(--muted); margin-bottom: 2px; }
+  form#send { display: flex; gap: 6px; padding: 10px 14px; border-top: 1px solid var(--border); }
+  form#send input { flex: 1; font: inherit; padding: 8px; border: 1px solid var(--border); border-radius: 6px; background: var(--bg); color: var(--text); }
+  form#send button { font: inherit; padding: 8px 14px; border: 0; border-radius: 6px; background: var(--accent); color: #fff; cursor: pointer; }
+  #err { color: #d6336c; padding: 0 14px; min-height: 1.4em; }
+</style>
+</head>
+<body>
+<div class="app">
+  <header>
+    <h1>Conversio chat <span class="muted">(simulator)</span></h1>
+    <div class="row">
+      <select id="product" title="Product">
+        <option value="credipay">Credipay</option>
+        <option value="finsaas">FinSaaS</option>
+        <option value="finsaas-lending">FinSaaS Lending</option>
+      </select>
+      <input id="name" value="Jamie Customer" size="14" title="Customer name">
+      <input id="email" value="jamie@acme.com" size="18" title="Customer email">
+      <button id="new" type="button">New conversation</button>
+    </div>
+    <div class="muted" id="conv"></div>
+  </header>
+  <div id="log"></div>
+  <div id="err"></div>
+  <form id="send">
+    <input id="text" placeholder="Type a message…" autocomplete="off" required>
+    <button type="submit">Send</button>
+  </form>
+</div>
+<script>
+  const $ = (id) => document.getElementById(id);
+  const newId = () => (crypto.randomUUID ? crypto.randomUUID() : String(Date.now()) + Math.random());
+  let conversationId = null;
+  let correlationId = null;
+  try { conversationId = localStorage.getItem('conversio.conversation'); correlationId = localStorage.getItem('conversio.correlation'); } catch (e) {}
+  function startConversation() {
+    conversationId = 'conv-' + newId().slice(0, 8);
+    correlationId = newId();
+    try { localStorage.setItem('conversio.conversation', conversationId); localStorage.setItem('conversio.correlation', correlationId); } catch (e) {}
+    $('log').replaceChildren();
+    show();
+  }
+  function show() { $('conv').textContent = `conversation ${conversationId} · correlation ${correlationId}`; }
+  if (!conversationId || !correlationId) startConversation(); else show();
+  $('new').onclick = startConversation;
+
+  function bubble(m) {
+    const node = document.createElement('div');
+    node.className = 'bubble ' + m.sender;
+    const who = document.createElement('div');
+    who.className = 'who';
+    who.textContent = m.sender === 'customer' ? 'You' : 'Support agent';
+    const body = document.createElement('div');
+    body.textContent = m.text;
+    node.append(who, body);
+    return node;
+  }
+
+  let lastSig = '';
+  async function refresh() {
+    try {
+      const r = await fetch('/conversio/conversations/' + encodeURIComponent(conversationId));
+      if (!r.ok) return;
+      const data = await r.json();
+      const sig = data.messages.map((m) => m.id).join(',');
+      if (sig === lastSig) return;
+      lastSig = sig;
+      const log = $('log');
+      log.replaceChildren(...data.messages.map(bubble));
+      log.scrollTop = log.scrollHeight;
+    } catch (e) { /* server restarting; try again next tick */ }
+  }
+  setInterval(refresh, 2000);
+  refresh();
+
+  $('send').addEventListener('submit', async (event) => {
+    event.preventDefault();
+    const text = $('text').value.trim();
+    if (!text) return;
+    $('err').textContent = '';
+    const payload = {
+      tenant_id: 'commsworth',
+      user: { id: $('email').value, email: $('email').value, name: $('name').value },
+      product: $('product').value,
+      conversation_id: conversationId,
+      correlation_id: correlationId,
+      text,
+    };
+    const r = await fetch('/conversio/messages', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload) });
+    if (!r.ok) { $('err').textContent = 'Could not send: ' + r.status; return; }
+    $('text').value = '';
+    lastSig = '';
+    refresh();
+  });
+</script>
+</body>
+</html>

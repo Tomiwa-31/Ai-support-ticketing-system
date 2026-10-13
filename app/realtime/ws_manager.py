@@ -7,7 +7,8 @@ from sqlalchemy import event, select
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 from sqlalchemy.orm import Session
 
-from app.models import SLA, AuditLog, Contact, Issue, Message, SLAInstance, Tag, User
+from app.ai import events as ai_events
+from app.models import SLA, AIRun, AISuggestion, AuditLog, Contact, Issue, Message, SLAInstance, Tag, User
 from app.models.tag import issue_tags
 from app.sla import sla_engine
 
@@ -63,6 +64,36 @@ async def build_snapshot(session_factory: async_sessionmaker[AsyncSession]) -> d
                 "breached_at": _iso(instance.breached_at),
             }
 
+        # Latest AI run and suggestion per issue (ids ascend, so the last one written wins).
+        latest_run: dict[int, AIRun] = {r.issue_id: r for r in (await session.scalars(select(AIRun).order_by(AIRun.id))).all()}
+        latest_suggestion: dict[int, AISuggestion] = {
+            s.issue_id: s for s in (await session.scalars(select(AISuggestion).order_by(AISuggestion.id))).all()
+        }
+        sources_by_run = await ai_events.knowledge_sources(session, [r.id for r in latest_run.values()])
+        tools_by_run = await ai_events.tool_activity(session, [r.id for r in latest_run.values()])
+        ai_by_issue: dict[int, dict[str, Any]] = {}
+        for issue_id, run in latest_run.items():
+            suggestion = latest_suggestion.get(issue_id)
+            ai_by_issue[issue_id] = {
+                "run_id": run.id,
+                "run_status": run.status,
+                "run_error": run.error,
+                "sources": sources_by_run.get(run.id, []),
+                "tools": tools_by_run.get(run.id, []),
+                "suggestion": None
+                if suggestion is None
+                else {
+                    "id": suggestion.id,
+                    "status": suggestion.status,
+                    "category": suggestion.category,
+                    "priority": suggestion.priority,
+                    "summary": suggestion.summary,
+                    "draft_reply": suggestion.draft_reply,
+                    "recommended_action": suggestion.recommended_action,
+                    "final_reply": suggestion.final_reply,
+                },
+            }
+
         audit_logs = (
             await session.scalars(select(AuditLog).order_by(AuditLog.id.desc()).limit(AUDIT_LOG_LIMIT))
         ).all()
@@ -82,6 +113,7 @@ async def build_snapshot(session_factory: async_sessionmaker[AsyncSession]) -> d
                     "tags": sorted(tags_by_issue.get(issue.id, [])),
                     "sla": sla_by_issue.get(issue.id),
                     "messages": messages_by_issue.get(issue.id, []),
+                    "ai": ai_by_issue.get(issue.id),
                 }
                 for issue in issues
             ],
